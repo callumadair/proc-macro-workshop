@@ -1,7 +1,8 @@
 use proc_macro::TokenStream;
+use proc_macro2::Ident;
 
 use quote::{format_ident, quote};
-use syn::{Data, DeriveInput, parse_macro_input};
+use syn::{parse_macro_input, Data, DataStruct, DeriveInput};
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: proc_macro::TokenStream) -> TokenStream {
@@ -18,25 +19,33 @@ pub fn derive(input: proc_macro::TokenStream) -> TokenStream {
         unimplemented!()
     };
 
-    let field_idents: Vec<proc_macro2::TokenStream> = data.fields.iter().map(|f| {
-        let ident = &f.ident;
-        quote! {
-            #ident
-        }
-    }).collect();
+    let field_idents = generate_field_idents(&data);
 
-    let field_types: Vec<proc_macro2::TokenStream> = data.fields.iter().map(|f| {
-        let ty = &f.ty;
-        quote! {
-            #ty
-        }
-    }).collect();
+    let field_types = generate_field_types(data);
 
     let struct_fields = quote! {
         #(#field_idents: Option<#field_types>,)*
     };
 
-    let output = quote! {
+    let output = generate_output(
+        struct_ident,
+        builder_ident,
+        field_idents,
+        field_types,
+        struct_fields,
+    );
+
+    output.into()
+}
+
+fn generate_output(
+    struct_ident: Ident,
+    builder_ident: Ident,
+    field_idents: Vec<proc_macro2::TokenStream>,
+    field_types: Vec<proc_macro2::TokenStream>,
+    struct_fields: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let output: proc_macro2::TokenStream = quote! {
         use std::{error::Error, fmt};
 
         #[derive(Debug, Clone)]
@@ -83,9 +92,33 @@ pub fn derive(input: proc_macro::TokenStream) -> TokenStream {
 
         }
     };
-
-    output.into()
+    output
 }
 
+fn generate_field_types(data: DataStruct) -> Vec<proc_macro2::TokenStream> {
+    let field_types: Vec<proc_macro2::TokenStream> = data
+        .fields
+        .iter()
+        .map(|f| {
+            let ty = &f.ty;
+            quote! {
+                #ty
+            }
+        })
+        .collect();
+    field_types
+}
 
-
+fn generate_field_idents(data: &DataStruct) -> Vec<proc_macro2::TokenStream> {
+    let field_idents: Vec<proc_macro2::TokenStream> = data
+        .fields
+        .iter()
+        .map(|f| {
+            let ident = &f.ident;
+            quote! {
+                #ident
+            }
+        })
+        .collect();
+    field_idents
+}
