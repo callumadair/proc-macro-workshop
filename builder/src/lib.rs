@@ -9,7 +9,6 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
     let struct_ident = ast.ident;
-    let builder_ident = format_ident!("{}Builder", struct_ident);
 
     let _input_data: Data = ast.data;
     let data = if let Data::Struct(data) = _input_data {
@@ -18,34 +17,20 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         unimplemented!()
     };
 
-    let field_idents = generate_field_idents(&data);
-
-    let field_types = generate_field_types(&data);
-
-    let struct_fields = quote! {
-        #(#field_idents: Option<#field_types>,)*
-    };
-
-    let builder_methods = generate_builder_methods(&data);
-
-    let output = generate_output(
-        struct_ident,
-        builder_ident,
-        struct_fields,
-        field_idents,
-        builder_methods,
-    );
+    let output = generate_output(struct_ident, data);
 
     output.into()
 }
 
-fn generate_output(
-    struct_ident: Ident,
-    builder_ident: Ident,
-    struct_fields: TokenStream,
-    field_idents: Vec<TokenStream>,
-    builder_methods: Vec<TokenStream>,
-) -> TokenStream {
+fn generate_output(struct_ident: Ident, data: DataStruct) -> TokenStream {
+    let builder_ident = format_ident!("{}Builder", struct_ident);
+    let field_idents = generate_field_idents(&data);
+    let field_types = generate_field_types(&data);
+    let struct_fields = quote! {
+        #(#field_idents: Option<#field_types>,)*
+    };
+    let builder_methods = generate_builder_methods(&data);
+
     let output: TokenStream = quote! {
         use std::{error::Error, fmt};
 
@@ -75,6 +60,7 @@ fn generate_output(
         impl #builder_ident {
 
             pub fn build(&mut self) -> Result<#struct_ident, Box<dyn Error>> {
+                // TODO make this not throw an error if the field inside the option is itself an option.
                 #(if self.#field_idents.is_none() {
                     return Err(
                          Box::new(DeriveError {})
@@ -87,12 +73,6 @@ fn generate_output(
             }
 
             #(#builder_methods)*
-
-            // #(fn #field_idents(&mut self, #field_idents: #field_types) -> &mut Self {
-            //     self.#field_idents = Some(#field_idents);
-            //     self
-            // })*
-
         }
     };
     output
@@ -135,8 +115,6 @@ fn generate_builder_methods(data: &DataStruct) -> Vec<TokenStream> {
             let field_type = &f.ty;
 
             let type_string = field_type.to_token_stream().to_string();
-            eprintln!("{}", format!("{}", type_string.as_str()));
-
             if type_string.starts_with("Option < ") {
                 let option_wrapped_type = &type_string[9..type_string.len() - 2];
                 let field_type = TokenStream::from_str(option_wrapped_type).unwrap();
