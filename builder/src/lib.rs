@@ -60,15 +60,17 @@ fn generate_output(struct_ident: Ident, data: DataStruct) -> TokenStream {
         impl #builder_ident {
 
             pub fn build(&mut self) -> Result<#struct_ident, Box<dyn Error>> {
-                // TODO make this not throw an error if the field inside the option is itself an option.
                 #(if self.#field_idents.is_none() {
+                     if #field_types.to_token_stream().to_string().starts_with("Option < ") {
+                        println!("option");
+                     }
                     return Err(
-                         Box::new(DeriveError {})
-                     );
+                        Box::new(DeriveError {})
+                    );
                 })*
 
                 Ok(#struct_ident {
-                    #(#field_idents: self.#field_idents.clone().unwrap(),)*
+                    #(#field_idents: self.#field_idents.clone().expect("This field has a value of None, but should be Some(x)."),)*
                 })
             }
 
@@ -135,4 +137,34 @@ fn generate_builder_methods(data: &DataStruct) -> Vec<TokenStream> {
         })
         .collect();
     builder_methods
+}
+
+// Taken from here: https://github.com/jonhoo/proc-macro-workshop/blob/master/builder/src/lib.rs
+// This mostly makes sense to me, but some bits are kinda tricky.
+// TODO Figure out how this all works exactly, read the appropriate syn docs and then use this or something like this
+//  to make it more concise like: https://github.com/jonhoo/proc-macro-workshop/blob/master/builder/src/lib.rs?#L25-L33
+fn ty_inner_type<'a>(wrapper: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> {
+    if let syn::Type::Path(ref p) = ty {
+        // If there is more than one thing wrapped inside the path? wrapper OR the wrapper is not the first segments ident return None.
+        if p.path.segments.len() != 1 || p.path.segments[0].ident != wrapper {
+            return None;
+        }
+
+        // If there is an angle bracketed generic type do below:
+        if let syn::PathArguments::AngleBracketed(ref inner_ty) = p.path.segments[0].arguments {
+            // If there is not only one type wrapped in the generic return None?
+            if inner_ty.args.len() != 1 {
+                return None;
+            }
+
+            // Convert the wrapped type into a usable enum.
+            let inner_ty = inner_ty.args.first().unwrap();
+            // Get the type of the generic argument.
+            if let syn::GenericArgument::Type(ref t) = inner_ty.value() {
+                return Some(t);
+            }
+        }
+    }
+    // Return None if there isn't a valid type path.
+    None
 }
