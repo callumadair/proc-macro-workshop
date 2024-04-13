@@ -1,14 +1,13 @@
-use proc_macro2::{Ident, TokenStream};
-use std::str::FromStr;
-
 use quote::{format_ident, quote, ToTokens};
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput};
+use std::str::FromStr;
+use syn::{parse_macro_input, Data, DeriveInput};
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
-    let struct_ident = ast.ident;
+    let struct_ident = &ast.ident;
+    let builder_ident = format_ident!("{}Builder", struct_ident);
 
     let _input_data: Data = ast.data;
     let data = if let Data::Struct(data) = _input_data {
@@ -17,141 +16,105 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         unimplemented!()
     };
 
-    let output = generate_output(struct_ident, data);
+    let builder_fields = data.fields.iter().map(|f| {
+        let field_name = &f.ident;
+        let original_ty = &f.ty;
 
-    output.into()
-}
+        if ty_wrapped_type("Option", original_ty).is_some() {
+            quote! {#field_name: # original_ty }
+        } else {
+            quote! { #field_name: std::option::Option<#original_ty> }
+        }
+    });
 
-fn generate_output(struct_ident: Ident, data: DataStruct) -> TokenStream {
-    let builder_ident = format_ident!("{}Builder", struct_ident);
-    let field_idents = generate_field_idents(&data);
-    let field_types = generate_field_types(&data);
-    let struct_fields = quote! {
-        #(#field_idents: Option<#field_types>,)*
-    };
-    let builder_methods = generate_builder_methods(&data);
+    let builder_methods = data.fields.iter().map(|f| {
+        let field_name = f.ident.as_ref().unwrap();
+        let original_ty = &f.ty;
 
-    let output: TokenStream = quote! {
-        use std::{error::Error, fmt};
+        let (arg_type, value) = if let Some(inner_ty) = ty_wrapped_type("Option", original_ty) {
+            (inner_ty, quote! { std::option::Option::Some(#field_name)})
+        } else {
+            (original_ty, quote! {std::option::Option})
+        };
+        let set_method = quote! {
+            pub fn #field_name(&mut self, #field_name: #arg_type) -> &mut Self {
+                self.#field_name = #value
+                self
+            }
+        };
+    });
 
-        #[derive(Debug, Clone)]
-        struct DeriveError;
-
-        impl Error for DeriveError {}
-
-        impl fmt::Display for DeriveError {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, ": derivation error.")
+    let build_fields = data.fields.iter().map(|f| {
+        let field_name = &f.ident;
+        if ty_wrapped_type("Option", &f.ty).is_some() {
+            quote! {
+                // Why clone?
+                #field_name: self.#field_name.clone()
+            }
+        } else {
+            quote! {
+                // Why clone?
+                #field_name: self.#field_name.clone().ok_or(concat!(stringify!(#field_name), " is not set."))?
             }
         }
+    });
 
+    let build_empty = data.fields.iter().map(|f| {
+        let field_name = &f.ident;
+
+        quote! {
+            #field_name: std::option::Option::None
+        }
+    });
+
+    let doc = format!("\
+            Implements the [builder pattern] for [`{}`].\n\
+            \n\
+            [builder pattern]: https://rust-lang-nursery.github.io/api-guidelines/type-safety.html#c-builder", struct_ident);
+
+    let output = quote! {
+        #[doc = #doc]
         pub struct #builder_ident {
-            #struct_fields
-        }
-
-        impl #struct_ident {
-            pub fn builder() ->#builder_ident {
-                #builder_ident {
-                    #(#field_idents: None,)*
-                }
-            }
+            #(#builder_fields,)*
         }
 
         impl #builder_ident {
+            #(#builder_methods)*
 
-            pub fn build(&mut self) -> Result<#struct_ident, Box<dyn Error>> {
-                #(if self.#field_idents.is_none() {
-                     if #field_types.to_token_stream().to_string().starts_with("Option < ") {
-                        println!("option");
-                     }
-                    return Err(
-                        Box::new(DeriveError {})
-                    );
-                })*
-
-                Ok(#struct_ident {
-                    #(#field_idents: self.#field_idents.clone().expect("This field has a value of None, but should be Some(x)."),)*
+            pub fn build(&self) -> std::result::Result<#struct_ident, std::boxed::Box<dyn: std::error::Error>> {
+                std::result::Result::Ok(#struct_ident {
+                    #(build_fields,)*
                 })
             }
+        }
 
-            #(#builder_methods)*
+        impl #struct_ident {
+            pub fn builder() -> #builder_ident {
+                #builder_ident {
+                    #(#build_empty,)*
+                }
+            }
         }
     };
-    output
-}
 
-fn generate_field_idents(data: &DataStruct) -> Vec<TokenStream> {
-    let field_idents: Vec<TokenStream> = data
-        .fields
-        .iter()
-        .map(|f| {
-            let ident = &f.ident;
-            quote! {
-                #ident
-            }
-        })
-        .collect();
-    field_idents
-}
-
-fn generate_field_types(data: &DataStruct) -> Vec<TokenStream> {
-    let field_types: Vec<TokenStream> = data
-        .fields
-        .iter()
-        .map(|f| {
-            let ty = &f.ty;
-            quote! {
-                #ty
-            }
-        })
-        .collect();
-    field_types
-}
-
-fn generate_builder_methods(data: &DataStruct) -> Vec<TokenStream> {
-    let builder_methods: Vec<TokenStream> = data
-        .fields
-        .iter()
-        .map(|f| {
-            let field_ident = &f.ident;
-            let field_type = &f.ty;
-
-            let type_string = field_type.to_token_stream().to_string();
-            if type_string.starts_with("Option < ") {
-                let option_wrapped_type = &type_string[9..type_string.len() - 2];
-                let field_type = TokenStream::from_str(option_wrapped_type).unwrap();
-                quote! {
-                    fn #field_ident(&mut self, #field_ident: #field_type) -> &mut Self {
-                        self.#field_ident = Some(Some(#field_ident));
-                        self
-                    }
-                }
-            } else {
-                quote! {
-                    fn #field_ident(&mut self, #field_ident: #field_type) -> &mut Self {
-                        self.#field_ident = Some(#field_ident);
-                        self
-                    }
-                }
-            }
-        })
-        .collect();
-    builder_methods
+    output.into()
 }
 
 // Taken from here: https://github.com/jonhoo/proc-macro-workshop/blob/master/builder/src/lib.rs
 // This mostly makes sense to me, but some bits are kinda tricky.
 // TODO Figure out how this all works exactly, read the appropriate syn docs and then use this or something like this
 //  to make it more concise like: https://github.com/jonhoo/proc-macro-workshop/blob/master/builder/src/lib.rs?#L25-L33
-fn ty_inner_type<'a>(wrapper: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> {
-    if let syn::Type::Path(ref p) = ty {
+fn ty_wrapped_type<'a>(wrapper: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> {
+    if let syn::Type::Path(ref type_path) = ty {
         // If there is more than one thing wrapped inside the path? wrapper OR the wrapper is not the first segments ident return None.
-        if p.path.segments.len() != 1 || p.path.segments[0].ident != wrapper {
+        if type_path.path.segments.len() != 1 || type_path.path.segments[0].ident != wrapper {
             return None;
         }
 
         // If there is an angle bracketed generic type do below:
-        if let syn::PathArguments::AngleBracketed(ref inner_ty) = p.path.segments[0].arguments {
+        if let syn::PathArguments::AngleBracketed(ref inner_ty) =
+            type_path.path.segments[0].arguments
+        {
             // If there is not only one type wrapped in the generic return None?
             if inner_ty.args.len() != 1 {
                 return None;
