@@ -1,11 +1,9 @@
-use quote::{format_ident, quote, ToTokens};
-use std::str::FromStr;
+use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput};
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
-
     let struct_ident = &ast.ident;
     let builder_ident = format_ident!("{}Builder", struct_ident);
 
@@ -21,7 +19,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         let original_ty = &f.ty;
 
         if ty_wrapped_type("Option", original_ty).is_some() {
-            quote! {#field_name: # original_ty }
+            quote! { #field_name: #original_ty }
         } else {
             quote! { #field_name: std::option::Option<#original_ty> }
         }
@@ -31,17 +29,13 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         let field_name = f.ident.as_ref().unwrap();
         let original_ty = &f.ty;
 
-        let (arg_type, value) = if let Some(inner_ty) = ty_wrapped_type("Option", original_ty) {
-            (inner_ty, quote! { std::option::Option::Some(#field_name)})
-        } else {
-            (original_ty, quote! {std::option::Option})
-        };
-        let set_method = quote! {
-            pub fn #field_name(&mut self, #field_name: #arg_type) -> &mut Self {
-                self.#field_name = #value
-                self
-            }
-        };
+        let (arg_type, value) =
+            if let Some(inner_ty) = ty_wrapped_type("Option", original_ty) {
+                (inner_ty, quote! { std::option::Option::Some(#field_name) })
+            } else {
+                (original_ty, quote! { std::option::Option::Some(#field_name) })
+            };
+        value
     });
 
     let build_fields = data.fields.iter().map(|f| {
@@ -75,7 +69,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let output = quote! {
         #[doc = #doc]
         pub struct #builder_ident {
-            #(#builder_fields,)*
+            #(#builder_fields),*
         }
 
         impl #builder_ident {
@@ -83,11 +77,10 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
             pub fn build(&self) -> std::result::Result<#struct_ident, std::boxed::Box<dyn: std::error::Error>> {
                 std::result::Result::Ok(#struct_ident {
-                    #(build_fields,)*
+                    #(#build_fields,)*
                 })
             }
         }
-
         impl #struct_ident {
             pub fn builder() -> #builder_ident {
                 #builder_ident {
@@ -102,8 +95,8 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 // Taken from here: https://github.com/jonhoo/proc-macro-workshop/blob/master/builder/src/lib.rs
 // This mostly makes sense to me, but some bits are kinda tricky.
-// TODO Figure out how this all works exactly, read the appropriate syn docs and then use this or something like this
-//  to make it more concise like: https://github.com/jonhoo/proc-macro-workshop/blob/master/builder/src/lib.rs?#L25-L33
+// Figure out how this all works exactly, read the appropriate syn docs and then use this or something like this
+// to make it more concise like: https://github.com/jonhoo/proc-macro-workshop/blob/master/builder/src/lib.rs?#L25-L33
 fn ty_wrapped_type<'a>(wrapper: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> {
     if let syn::Type::Path(ref type_path) = ty {
         // If there is more than one thing wrapped inside the path? wrapper OR the wrapper is not the first segments ident return None.
@@ -123,7 +116,7 @@ fn ty_wrapped_type<'a>(wrapper: &str, ty: &'a syn::Type) -> Option<&'a syn::Type
             // Convert the wrapped type into a usable enum.
             let inner_ty = inner_ty.args.first().unwrap();
             // Get the type of the generic argument.
-            if let syn::GenericArgument::Type(ref t) = inner_ty.value() {
+            if let syn::GenericArgument::Type(ref t) = inner_ty {
                 return Some(t);
             }
         }
