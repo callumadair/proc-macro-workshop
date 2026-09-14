@@ -1,16 +1,12 @@
 [package]
 name = "derive_builder"
 version = "0.0.0"
-autotests = false
 edition = "2024"
 publish = false
+autotests = false
 
 [lib]
 proc-macro = true
-
-[[test]]
-name = "tests"
-path = "tests/progress.rs"
 
 [[example]]
 name = "parse"
@@ -20,10 +16,22 @@ path = "tests/01-parse.rs"
 name = "create-builder"
 path = "tests/02-create-builder.rs"
 
-[dev-dependencies]
-trybuild = { version = "1.0.108", features = ["diff"] }
+[[example]]
+name = "call-setters"
+path = "tests/03-call-setters.rs"
+
+[[example]]
+name = "call-build"
+path = "tests/04-call-build.rs"
+
+[[test]]
+name = "tests"
+path = "tests/progress.rs"
 
 [dependencies]
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
-syn = {version = "3.0.5", features = ["full"]}
+syn = { version = "3.0.5", features = ["full"] }
+
+[dev-dependencies]
+trybuild = { version = "1.0.108", features = ["diff"] }
