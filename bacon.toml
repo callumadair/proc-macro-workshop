@@ -1,0 +1,5 @@
+default_job = "build"
+
+[jobs.build]
+command = ["cargo", "build", "--workspace"]
+need_stdout = true

@@ -1,10 +1,11 @@
 [package]
 name = "proc-macro-workshop"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [workspace]
+members = ["bitfield", "builder", "debug", "seq", "sorted"]
 
 [[bin]]
 name = "workshop"
@@ -16,3 +17,11 @@ derive_builder = { path = "builder" }
 derive_debug = { path = "debug" }
 seq = { path = "seq" }
 sorted = { path = "sorted" }
+
+[profile.dev]
+opt-level = 0
+debug = 1
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 0

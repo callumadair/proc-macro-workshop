@@ -1,0 +1,18 @@
+{
+    "lsp": {
+        "rust-analyzer": {
+            "initialization_options": {
+                "cargo": {
+                    "allTargets": true
+                },
+                "linkedProjects": [
+                    "bitfield/Cargo.toml",
+                    "builder/Cargo.toml",
+                    "debug/Cargo.toml",
+                    "seq/Cargo.toml",
+                    "sorted/Cargo.toml"
+                ]
+            }
+        }
+    }
+}

@@ -2,7 +2,7 @@
 name = "derive_builder"
 version = "0.0.0"
 autotests = false
-edition = "2021"
+edition = "2024"
 publish = false
 
 [lib]
@@ -12,8 +12,18 @@ proc-macro = true
 name = "tests"
 path = "tests/progress.rs"
 
+[[example]]
+name = "parse"
+path = "tests/01-parse.rs"
+
+[[example]]
+name = "create-builder"
+path = "tests/02-create-builder.rs"
+
 [dev-dependencies]
 trybuild = { version = "1.0.108", features = ["diff"] }
 
 [dependencies]
-# TODO
+proc-macro2 = "1.0.107"
+quote = "1.0.47"
+syn = {version = "3.0.5", features = ["full"]}
