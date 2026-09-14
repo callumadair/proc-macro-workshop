@@ -21,8 +21,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     } = parse_macro_input!(input as DeriveInput);
 
     let builder_name = quote::format_ident!("{}Builder", ident);
-    let (builder_field_names, builder_fields_types, builder_methods) =
-        create_builder_fields_and_methods(data);
+    let (field_names, field_types, builder_methods) = create_builder_fields_and_methods(data);
     let out = quote! {
         impl #ident {
             pub fn builder() -> #builder_name {
@@ -31,7 +30,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
 
         struct #builder_name {
-            #( #builder_field_names: #builder_fields_types, )*
+            #( #field_names: Option<#field_types>, )*
         }
 
         impl std::default::Default for #builder_name {
@@ -43,13 +42,14 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
 
         impl #builder_name {
-            // fn build(self) -> #ident {
-            //     #(
-            //         if let Some(#builder_field_names) = self.#builder_field_names {
-
-            //         }
-            //     )*
-            // }
+            fn build(self) -> #ident {
+                #(
+                    let #field_names = self.#field_names.unwrap_or_default();
+                )*
+                #ident {
+                    #(#field_names,)*
+                }
+            }
 
             #(#builder_methods)*
         }
@@ -86,7 +86,7 @@ fn create_builder_fields_and_methods(
                                     #field_ident
                                 },
                                 quote! {
-                                  Option<#field_ty>
+                                  #field_ty
                                 },
                                 quote! {fn #field_ident(&mut self, #field_ident: #field_ty) {
                                     self.#field_ident = Some(#field_ident);
