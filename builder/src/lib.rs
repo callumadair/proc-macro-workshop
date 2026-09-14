@@ -46,9 +46,12 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         struct #builder_error;
 
         impl #builder_name {
-            fn build(self) -> core::result::Result<#ident, #builder_error> {
+            fn build(&mut self) -> core::result::Result<#ident, #builder_error> {
                 #(
-                    let #field_names = self.#field_names.unwrap_or_default();
+                    let #field_names = self.#field_names
+                        .as_ref()
+                        .ok_or_else(|| #builder_error)?
+                        .clone();
                 )*
                 Ok(#ident {
                     #(#field_names,)*
@@ -77,32 +80,32 @@ fn create_builder_fields_and_methods(
         {
             match data_struct.fields
             {
-                syn::Fields::Named(fields_named) =>
-                {
-                    fields_named
-                        .named
-                        .iter()
-                        .map(|field| {
-                            let field_ident = field.ident.clone().unwrap();
-                            let field_ty = field.ty.clone();
-                            (
-                                quote! {
-                                    #field_ident
-                                },
-                                quote! {
-                                  #field_ty
-                                },
-                                quote! {fn #field_ident(&mut self, #field_ident: #field_ty) {
+                syn::Fields::Named(fields_named) => fields_named
+                    .named
+                    .iter()
+                    .map(|field| {
+                        let field_ident = field.ident.clone().unwrap();
+                        let field_ty = field.ty.clone();
+                        (
+                            quote! {
+                                #field_ident
+                            },
+                            quote! {
+                              #field_ty
+                            },
+                            quote! {
+                                fn #field_ident(&mut self, #field_ident: #field_ty) -> &mut Self {
                                     self.#field_ident = Some(#field_ident);
-                                }},
-                            )
-                        })
-                        .collect::<(
-                            Vec<proc_macro2::TokenStream>,
-                            Vec<proc_macro2::TokenStream>,
-                            Vec<proc_macro2::TokenStream>,
-                        )>()
-                }
+                                    self
+                                }
+                            },
+                        )
+                    })
+                    .collect::<(
+                        Vec<proc_macro2::TokenStream>,
+                        Vec<proc_macro2::TokenStream>,
+                        Vec<proc_macro2::TokenStream>,
+                    )>(),
                 syn::Fields::Unnamed(_) | syn::Fields::Unit =>
                 {
                     unimplemented!("We only support structs with named fields.")

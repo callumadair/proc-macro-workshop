@@ -24,6 +24,10 @@ path = "tests/03-call-setters.rs"
 name = "call-build"
 path = "tests/04-call-build.rs"
 
+[[example]]
+name = "method-chaining"
+path = "tests/05-method-chaining.rs"
+
 [[test]]
 name = "tests"
 path = "tests/progress.rs"
