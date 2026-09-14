@@ -21,6 +21,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     } = parse_macro_input!(input as DeriveInput);
 
     let builder_name = quote::format_ident!("{}Builder", ident);
+    let builder_error = quote::format_ident!("{}BuildError", ident);
     let (field_names, field_types, builder_methods) = create_builder_fields_and_methods(data);
     let out = quote! {
         impl #ident {
@@ -41,14 +42,17 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             }
         }
 
+        #[derive(Debug)]
+        struct #builder_error;
+
         impl #builder_name {
-            fn build(self) -> #ident {
+            fn build(self) -> core::result::Result<#ident, #builder_error> {
                 #(
                     let #field_names = self.#field_names.unwrap_or_default();
                 )*
-                #ident {
+                Ok(#ident {
                     #(#field_names,)*
-                }
+                })
             }
 
             #(#builder_methods)*
