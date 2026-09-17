@@ -28,6 +28,10 @@ path = "tests/04-call-build.rs"
 name = "method-chaining"
 path = "tests/05-method-chaining.rs"
 
+[[example]]
+name = "optional-field"
+path = "tests/06-optional-field.rs"
+
 [[test]]
 name = "tests"
 path = "tests/progress.rs"
