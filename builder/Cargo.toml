@@ -32,6 +32,10 @@ path = "tests/05-method-chaining.rs"
 name = "optional-field"
 path = "tests/06-optional-field.rs"
 
+[[example]]
+name = "repeated-field"
+path = "tests/07-repeated-field.rs"
+
 [[test]]
 name = "tests"
 path = "tests/progress.rs"
@@ -40,6 +44,7 @@ path = "tests/progress.rs"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
 syn = { version = "3.0.5", features = ["full"] }
+thiserror = "2.0.20"
 
 [dev-dependencies]
 trybuild = { version = "1.0.108", features = ["diff"] }

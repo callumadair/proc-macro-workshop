@@ -8,6 +8,7 @@ use syn::{
     DeriveInput,
     GenericArgument,
     Ident,
+    LitStr,
     Path,
     PathArguments,
     Type,
@@ -15,7 +16,14 @@ use syn::{
     parse_macro_input,
 };
 
-#[proc_macro_derive(Builder)]
+use crate::error::BuilderMacroError::{
+    self,
+    UnsupportedTypeKind,
+};
+
+mod error;
+
+#[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 {
     let DeriveInput {
@@ -28,7 +36,12 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
     let builder_name = quote::format_ident!("{}Builder", ident);
     let builder_error = quote::format_ident!("{}BuildError", ident);
-    let (field_names, field_types, builder_methods) = create_builder_fields_and_methods(data);
+    let BuilderFieldsAndMethods {
+        field_names,
+        field_types,
+        builder_methods,
+    } = create_builder_fields_and_methods(data);
+
     let out = quote! {
         impl #ident {
             pub fn builder() -> #builder_name {
@@ -72,13 +85,14 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
 fn _parse_attrs(_attrs: Vec<Attribute>) -> () { todo!() }
 
-fn create_builder_fields_and_methods(
-    data: Data
-) -> (
-    Vec<proc_macro2::TokenStream>,
-    Vec<proc_macro2::TokenStream>,
-    Vec<proc_macro2::TokenStream>,
-)
+struct BuilderFieldsAndMethods
+{
+    field_names:     Vec<proc_macro2::TokenStream>,
+    field_types:     Vec<proc_macro2::TokenStream>,
+    builder_methods: Vec<proc_macro2::TokenStream>,
+}
+
+fn create_builder_fields_and_methods(data: Data) -> BuilderFieldsAndMethods
 {
     match data
     {
@@ -88,7 +102,7 @@ fn create_builder_fields_and_methods(
             {
                 syn::Fields::Named(fields_named) =>
                 {
-                    fields_named
+                    let (field_names, field_types, builder_methods) = fields_named
                         .named
                         .iter()
                         .map(|field| {
@@ -101,14 +115,16 @@ fn create_builder_fields_and_methods(
                                 quote! {
                                   #field_ty
                                 },
-                                construct_builder_method(&field_ident, &field_ty),
+                                // We need to do error handling here, but for now just unwrap.
+                                construct_builder_method(&field_ident, &field_ty).unwrap(),
                             )
                         })
-                        .collect::<(
-                            Vec<proc_macro2::TokenStream>,
-                            Vec<proc_macro2::TokenStream>,
-                            Vec<proc_macro2::TokenStream>,
-                        )>()
+                        .collect();
+                    BuilderFieldsAndMethods {
+                        field_names,
+                        field_types,
+                        builder_methods,
+                    }
                 }
                 syn::Fields::Unnamed(_) | syn::Fields::Unit =>
                 {
@@ -124,46 +140,70 @@ fn create_builder_fields_and_methods(
 }
 
 fn construct_builder_method(
-    field_ident: &Ident,
+    field_name: &Ident,
     field_type: &Type,
-) -> proc_macro2::TokenStream
+) -> error::Result<proc_macro2::TokenStream>
 {
-    match extract_field_type_kind(field_type)
+    let out = match extract_field_type_kind(field_type)?
     {
-        FieldKind::Field(_ident) =>
+        FieldKind::Field { arg_ty_ident: _ } =>
         {
             // We have to be careful here, as if we used
             // [`_ident`] here, we would get something like
             // `Vec` instead of `Vec<T>`.
             quote! {
-                fn #field_ident(&mut self, #field_ident: #field_type) -> &mut Self {
-                    self.#field_ident = Some(#field_ident);
+                fn #field_name(&mut self, #field_name: #field_type) -> &mut Self {
+                    self.#field_name = Some(#field_name);
                     self
                 }
             }
         }
-        FieldKind::OptionalField(ident) =>
+        FieldKind::OptionalField { arg_ty_ident } =>
         {
             quote! {
-                fn #field_ident(&mut self, #field_ident: #ident) -> &mut Self {
-                    self.#field_ident = Some(Some(#field_ident));
+                fn #field_name(&mut self, #field_name: #arg_ty_ident) -> &mut Self {
+                    self.#field_name = Some(Some(#field_name));
                     self
                 }
             }
         }
-    }
+        FieldKind::RepeatedField {
+            fn_name,
+            arg_ty_ident,
+        } =>
+        {
+            quote! {
+                fn #fn_name(&mut self, #field_name: #arg_ty_ident) -> &mut Self {
+                    self.#field_name.push(#field_name);
+                    self
+                }
+            }
+        }
+    };
+    Ok(out)
 }
 
 enum FieldKind
 {
-    Field(Ident),
-    OptionalField(Ident),
+    Field
+    {
+        arg_ty_ident: Ident
+    },
+    OptionalField
+    {
+        arg_ty_ident: Ident
+    },
+    RepeatedField
+    {
+        fn_name:      String,
+        arg_ty_ident: Ident,
+    },
 }
 
-fn extract_field_type_kind(ty: &Type) -> FieldKind
+fn extract_field_type_kind(ty: &Type) -> error::Result<FieldKind>
 {
     let Type::Path(TypePath {
-        attrs: _,
+        attrs,
         qself: _,
         path: Path {
             leading_colon: _,
@@ -172,29 +212,40 @@ fn extract_field_type_kind(ty: &Type) -> FieldKind
     }) = ty
     else
     {
-        unimplemented!("We do not support types other than Path based types.")
+        return Err(BuilderMacroError::UnsupportedTypeKind(
+            "We only expect path types here.",
+        ));
     };
 
     let Some(outer_segment) = outer_segments.last()
     else
     {
-        unimplemented!("Bad types provided in struct.")
+        return Err(BuilderMacroError::UnsupportedTypeKind(
+            "Bad types provided in struct.",
+        ));
     };
 
-    if outer_segment.ident != "Option"
+    if outer_segment.ident != "Option" && attrs.is_empty()
     {
-        return FieldKind::Field(outer_segment.ident.clone());
+        return Ok(FieldKind::Field {
+            arg_ty_ident: outer_segment.ident.clone(),
+        });
     }
 
     let PathArguments::AngleBracketed(angle_bracketed) = outer_segment.arguments.clone()
     else
     {
-        unimplemented!("We don't do this case currently.");
+        return Err(BuilderMacroError::UnsupportedTypeKind(
+            "We only expect angle bracketed types here!",
+        ));
     };
+
     let Some(GenericArgument::Type(inner_type)) = angle_bracketed.args.first()
     else
     {
-        unimplemented!("We were kinda expecting a generic argument containing an inner type here.")
+        return Err(BuilderMacroError::UnsupportedTypeKind(
+            "We were kinda expecting a generic argument containing an inner type here.",
+        ));
     };
 
     let Type::Path(TypePath {
@@ -208,13 +259,56 @@ fn extract_field_type_kind(ty: &Type) -> FieldKind
     }) = inner_type
     else
     {
-        unimplemented!("We do not support types other than Path based types.")
+        return Err(BuilderMacroError::UnsupportedTypeKind(
+            "We do not support types other than Path based types.",
+        ));
     };
 
     let Some(inner_segment) = inner_type_segments.last()
     else
     {
-        unimplemented!("Bad types provided in struct.")
+        return Err(BuilderMacroError::UnsupportedTypeKind(
+            "Bad types provided in struct.",
+        ));
     };
-    FieldKind::OptionalField(inner_segment.ident.clone())
+
+    if !attrs.is_empty()
+    {
+        let Some(attr) = attrs.first()
+        else
+        {
+            return Err(error::BuilderMacroError::NoAttributeFound);
+        };
+
+        if attr.path().is_ident("builder")
+        {
+            // attr.parse_nested_meta(|meta| {
+            //     if meta.path.is_ident("each")
+            //     {
+            //         builder_method_name = meta.value()?.parse()?;
+            //         Ok(())
+            //     }
+            //     else
+            //     {
+            //         return Err("We don't care about this."));
+            //     }
+            // })?;
+            
+
+            Ok(FieldKind::RepeatedField {
+                fn_name:      builder_method_name.value(),
+                arg_ty_ident: inner_segment.ident.clone(),
+            })
+        }
+        else
+        {
+            Err(BuilderMacroError::FieldAttributesEmpty)
+        }
+    }
+    else
+    {
+        Ok(FieldKind::OptionalField {
+            arg_ty_ident: inner_segment.ident.clone(),
+        })
+    }
 }
