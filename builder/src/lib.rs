@@ -6,9 +6,9 @@ use syn::{
     Attribute,
     Data,
     DeriveInput,
+    Field,
     GenericArgument,
     Ident,
-    LitStr,
     Path,
     PathArguments,
     Type,
@@ -16,10 +16,7 @@ use syn::{
     parse_macro_input,
 };
 
-use crate::error::BuilderMacroError::{
-    self,
-    UnsupportedTypeKind,
-};
+use crate::error::BuilderMacroError;
 
 mod error;
 
@@ -116,7 +113,7 @@ fn create_builder_fields_and_methods(data: Data) -> BuilderFieldsAndMethods
                                   #field_ty
                                 },
                                 // We need to do error handling here, but for now just unwrap.
-                                construct_builder_method(&field_ident, &field_ty).unwrap(),
+                                construct_builder_method(&field).unwrap(),
                             )
                         })
                         .collect();
@@ -139,14 +136,15 @@ fn create_builder_fields_and_methods(data: Data) -> BuilderFieldsAndMethods
     }
 }
 
-fn construct_builder_method(
-    field_name: &Ident,
-    field_type: &Type,
-) -> error::Result<proc_macro2::TokenStream>
+fn construct_builder_method(field: &Field) -> error::Result<proc_macro2::TokenStream>
 {
-    let out = match extract_field_type_kind(field_type)?
+    let field_name = &&field.ident.as_ref().ok_or(BuilderMacroError::MissingIdent(
+        "No ident found for field type",
+    ))?;
+    let field_type = &field.ty;
+    let out = match extract_field_type_kind(field)?
     {
-        FieldKind::Field { arg_ty_ident: _ } =>
+        FieldKind::Field =>
         {
             // We have to be careful here, as if we used
             // [`_ident`] here, we would get something like
@@ -168,12 +166,12 @@ fn construct_builder_method(
             }
         }
         FieldKind::RepeatedField {
-            fn_name,
+            each_name: fn_name,
             arg_ty_ident,
         } =>
         {
             quote! {
-                fn #fn_name(&mut self, #field_name: #arg_ty_ident) -> &mut Self {
+                fn #fn_name(&mut self, #fn_name: #arg_ty_ident) -> &mut Self {
                     self.#field_name.push(#field_name);
                     self
                 }
@@ -185,31 +183,28 @@ fn construct_builder_method(
 
 enum FieldKind
 {
-    Field
-    {
-        arg_ty_ident: Ident
-    },
+    Field,
     OptionalField
     {
-        arg_ty_ident: Ident
+        arg_ty_ident: Ident,
     },
     RepeatedField
     {
-        fn_name:      String,
+        each_name:    Ident,
         arg_ty_ident: Ident,
     },
 }
 
-fn extract_field_type_kind(ty: &Type) -> error::Result<FieldKind>
+fn extract_field_type_kind(field: &Field) -> error::Result<FieldKind>
 {
     let Type::Path(TypePath {
-        attrs,
+        attrs: _,
         qself: _,
         path: Path {
             leading_colon: _,
             segments: outer_segments,
         },
-    }) = ty
+    }) = &field.ty
     else
     {
         return Err(BuilderMacroError::UnsupportedTypeKind(
@@ -217,21 +212,68 @@ fn extract_field_type_kind(ty: &Type) -> error::Result<FieldKind>
         ));
     };
 
-    let Some(outer_segment) = outer_segments.last()
+    let outer_segment = outer_segments
+        .last()
+        .ok_or(BuilderMacroError::UnsupportedTypeKind(
+            "Bad types provided in struct.",
+        ))?;
+
+    if outer_segment.ident == "Option"
+    {
+        let inner_segment = get_inner_segment(outer_segment)?;
+
+        Ok(FieldKind::OptionalField {
+            arg_ty_ident: inner_segment.ident.clone(),
+        })
+    }
+    else if outer_segment.ident == "Vec"
+    {
+        if !field.attrs.is_empty()
+        {
+            let Some(attr) = field.attrs.first()
+            else
+            {
+                return Err(error::BuilderMacroError::NoAttributeFound);
+            };
+
+            if attr.path().is_ident("builder")
+            {
+                let mut builder_method_name = String::new();
+                attr.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("each")
+                    {
+                        builder_method_name = meta.value()?.parse::<syn::LitStr>()?.value();
+                        Ok(())
+                    }
+                    else
+                    {
+                        unimplemented!("We don't care about this.");
+                    }
+                })?;
+
+                Ok(FieldKind::RepeatedField {
+                    each_name:    quote::format_ident!("{}", builder_method_name),
+                    arg_ty_ident: get_inner_segment(outer_segment)?.ident.clone(),
+                })
+            }
+            else
+            {
+                Err(BuilderMacroError::FieldAttributesEmpty)
+            }
+        }
+        else
+        {
+            Err(BuilderMacroError::FieldAttributesEmpty)
+        }
+    }
     else
     {
-        return Err(BuilderMacroError::UnsupportedTypeKind(
-            "Bad types provided in struct.",
-        ));
-    };
-
-    if outer_segment.ident != "Option" && attrs.is_empty()
-    {
-        return Ok(FieldKind::Field {
-            arg_ty_ident: outer_segment.ident.clone(),
-        });
+        Ok(FieldKind::Field)
     }
+}
 
+fn get_inner_segment(outer_segment: &syn::PathSegment) -> error::Result<syn::PathSegment>
+{
     let PathArguments::AngleBracketed(angle_bracketed) = outer_segment.arguments.clone()
     else
     {
@@ -239,7 +281,6 @@ fn extract_field_type_kind(ty: &Type) -> error::Result<FieldKind>
             "We only expect angle bracketed types here!",
         ));
     };
-
     let Some(GenericArgument::Type(inner_type)) = angle_bracketed.args.first()
     else
     {
@@ -247,7 +288,6 @@ fn extract_field_type_kind(ty: &Type) -> error::Result<FieldKind>
             "We were kinda expecting a generic argument containing an inner type here.",
         ));
     };
-
     let Type::Path(TypePath {
         attrs: _,
         qself: _,
@@ -263,52 +303,11 @@ fn extract_field_type_kind(ty: &Type) -> error::Result<FieldKind>
             "We do not support types other than Path based types.",
         ));
     };
-
-    let Some(inner_segment) = inner_type_segments.last()
-    else
-    {
-        return Err(BuilderMacroError::UnsupportedTypeKind(
+    let inner_segment = inner_type_segments
+        .last()
+        .ok_or(BuilderMacroError::UnsupportedTypeKind(
             "Bad types provided in struct.",
-        ));
-    };
-
-    if !attrs.is_empty()
-    {
-        let Some(attr) = attrs.first()
-        else
-        {
-            return Err(error::BuilderMacroError::NoAttributeFound);
-        };
-
-        if attr.path().is_ident("builder")
-        {
-            // attr.parse_nested_meta(|meta| {
-            //     if meta.path.is_ident("each")
-            //     {
-            //         builder_method_name = meta.value()?.parse()?;
-            //         Ok(())
-            //     }
-            //     else
-            //     {
-            //         return Err("We don't care about this."));
-            //     }
-            // })?;
-            
-
-            Ok(FieldKind::RepeatedField {
-                fn_name:      builder_method_name.value(),
-                arg_ty_ident: inner_segment.ident.clone(),
-            })
-        }
-        else
-        {
-            Err(BuilderMacroError::FieldAttributesEmpty)
-        }
-    }
-    else
-    {
-        Ok(FieldKind::OptionalField {
-            arg_ty_ident: inner_segment.ident.clone(),
-        })
-    }
+        ))?
+        .clone();
+    Ok(inner_segment)
 }
