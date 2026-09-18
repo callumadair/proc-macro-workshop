@@ -138,7 +138,7 @@ fn create_builder_fields_and_methods(data: Data) -> BuilderFieldsAndMethods
 
 fn construct_builder_method(field: &Field) -> error::Result<proc_macro2::TokenStream>
 {
-    let field_name = &&field.ident.as_ref().ok_or(BuilderMacroError::MissingIdent(
+    let field_name = field.ident.as_ref().ok_or(BuilderMacroError::MissingIdent(
         "No ident found for field type",
     ))?;
     let field_type = &field.ty;
@@ -172,7 +172,7 @@ fn construct_builder_method(field: &Field) -> error::Result<proc_macro2::TokenSt
         {
             quote! {
                 fn #fn_name(&mut self, #fn_name: #arg_ty_ident) -> &mut Self {
-                    self.#field_name.push(#field_name);
+                    self.#field_name.get_or_insert_with(Vec::new).push(#fn_name);
                     self
                 }
             }
@@ -226,40 +226,33 @@ fn extract_field_type_kind(field: &Field) -> error::Result<FieldKind>
             arg_ty_ident: inner_segment.ident.clone(),
         })
     }
-    else if outer_segment.ident == "Vec"
+    else if outer_segment.ident == "Vec" && !field.attrs.is_empty()
     {
-        if !field.attrs.is_empty()
+        let Some(attr) = field.attrs.first()
+        else
         {
-            let Some(attr) = field.attrs.first()
-            else
-            {
-                return Err(error::BuilderMacroError::NoAttributeFound);
-            };
+            return Err(error::BuilderMacroError::NoAttributeFound);
+        };
 
-            if attr.path().is_ident("builder")
-            {
-                let mut builder_method_name = String::new();
-                attr.parse_nested_meta(|meta| {
-                    if meta.path.is_ident("each")
-                    {
-                        builder_method_name = meta.value()?.parse::<syn::LitStr>()?.value();
-                        Ok(())
-                    }
-                    else
-                    {
-                        unimplemented!("We don't care about this.");
-                    }
-                })?;
+        if attr.path().is_ident("builder")
+        {
+            let mut builder_method_name = String::new();
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("each")
+                {
+                    builder_method_name = meta.value()?.parse::<syn::LitStr>()?.value();
+                    Ok(())
+                }
+                else
+                {
+                    unimplemented!("We don't care about this.");
+                }
+            })?;
 
-                Ok(FieldKind::RepeatedField {
-                    each_name:    quote::format_ident!("{}", builder_method_name),
-                    arg_ty_ident: get_inner_segment(outer_segment)?.ident.clone(),
-                })
-            }
-            else
-            {
-                Err(BuilderMacroError::FieldAttributesEmpty)
-            }
+            Ok(FieldKind::RepeatedField {
+                each_name:    quote::format_ident!("{}", builder_method_name),
+                arg_ty_ident: get_inner_segment(outer_segment)?.ident.clone(),
+            })
         }
         else
         {
