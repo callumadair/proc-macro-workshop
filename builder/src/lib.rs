@@ -130,10 +130,13 @@ fn construct_builder_method(
 {
     match extract_field_type_kind(field_type)
     {
-        FieldKind::Field(ident) =>
+        FieldKind::Field(_ident) =>
         {
+            // We have to be careful here, as if we used
+            // [`_ident`] here, we would get something like
+            // `Vec` instead of `Vec<T>`.
             quote! {
-                fn #field_ident(&mut self, #field_ident: #ident) -> &mut Self {
+                fn #field_ident(&mut self, #field_ident: #field_type) -> &mut Self {
                     self.#field_ident = Some(#field_ident);
                     self
                 }
