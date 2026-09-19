@@ -6,6 +6,7 @@ include = ["Cargo.toml"]
 
 [[schemas.overrides]]
 targets = [
+  "workspace.dependencies",
   "dependencies",
   "dev-dependencies",
   "build-dependencies",

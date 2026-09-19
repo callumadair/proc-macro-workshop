@@ -14,6 +14,7 @@ seq = { path = "seq" }
 sorted = { path = "sorted" }
 syn = { version = "3.0.5", features = ["full"] }
 thiserror = "2.0.20"
+trybuild = { version = "1.0.108", features = ["diff"] }
 
 [[bin]]
 name = "workshop"

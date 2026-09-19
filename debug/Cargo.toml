@@ -23,4 +23,4 @@ syn.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-trybuild = { version = "1.0.108", features = ["diff"] }
+trybuild.workspace = true
