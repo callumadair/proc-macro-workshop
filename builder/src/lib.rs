@@ -47,7 +47,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
 
         struct #builder_name {
-            #( #field_names: Option<#field_types>, )*
+            #( #field_names: core::option::Option<#field_types>, )*
         }
 
         impl std::default::Default for #builder_name {
