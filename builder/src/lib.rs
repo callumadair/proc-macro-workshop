@@ -113,7 +113,21 @@ fn create_builder_fields_and_methods(data: Data) -> BuilderFieldsAndMethods
                                   #field_ty
                                 },
                                 // We need to do error handling here, but for now just unwrap.
-                                construct_builder_method(&field).unwrap(),
+                                match construct_builder_method(&field)
+                                {
+                                    Ok(tokens) => tokens,
+                                    Err(BuilderMacroError::SynError(syn_error)) =>
+                                    {
+                                        syn_error.to_compile_error()
+                                    }
+                                    Err(inner_error) =>
+                                    {
+                                        let error_string = inner_error.to_string();
+                                        quote! {
+                                            ::core::compile_error!(#error_string);
+                                        }
+                                    }
+                                },
                             )
                         })
                         .collect();
@@ -245,7 +259,7 @@ fn extract_field_type_kind(field: &Field) -> error::Result<FieldKind>
                 }
                 else
                 {
-                    unimplemented!("We don't care about this.");
+                    Err(meta.error("expected `builder(each = \"...\")`"))
                 }
             })?;
 
