@@ -7,6 +7,14 @@ publish = false
 [workspace]
 members = ["bitfield", "builder", "debug", "seq", "sorted"]
 
+[workspace.dependencies]
+proc-macro2 = "1.0.107"
+quote = "1.0.47"
+seq = { path = "seq" }
+sorted = { path = "sorted" }
+syn = { version = "3.0.5", features = ["full"] }
+thiserror = "2.0.20"
+
 [[bin]]
 name = "workshop"
 path = "main.rs"
@@ -15,8 +23,6 @@ path = "main.rs"
 bitfield = { path = "bitfield" }
 derive_builder = { path = "builder" }
 derive_debug = { path = "debug" }
-seq = { path = "seq" }
-sorted = { path = "sorted" }
 
 [profile.dev]
 opt-level = 0
