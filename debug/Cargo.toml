@@ -12,6 +12,10 @@ proc-macro = true
 name = "parse"
 path = "tests/01-parse.rs"
 
+[[example]]
+name = "impl-debug"
+path = "tests/02-impl-debug.rs"
+
 [[test]]
 name = "tests"
 path = "tests/progress.rs"
